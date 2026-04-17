@@ -49,8 +49,7 @@
     "node": ">=20.19"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "tsdown && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
