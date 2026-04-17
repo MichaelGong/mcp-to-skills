@@ -1,5 +1,5 @@
-export type { LoadOptions } from './config'
-export { loadClaudeCodeConfig } from './config'
+export type { LoadLocalOptions, LoadOptions } from './config'
+export { loadClaudeCodeConfig, loadLocalMcpConfigs } from './config'
 
 export type { DiscoverOptions } from './discover'
 export { discoverAll, discoverServer } from './discover'

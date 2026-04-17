@@ -4,7 +4,10 @@
 
 探索本机 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 已配置的 MCP server，连上去拉取它们暴露的工具，并把每个 server 渲染成一份可被 Claude / Cursor 直接识别的 **Skill**（`SKILL.md` + 每个 tool 的 JSON Schema）。
 
-- 配置来源：`~/.claude.json` 中的顶层 `mcpServers`，以及 `projects[*].mcpServers`
+- 配置来源（自动合并）：
+  - **全局**：`~/.claude.json` 顶层的 `mcpServers`（可用 `--config` 指向其它文件）
+  - **项目（cwd）**：`<cwd>/.mcp.json`（Claude Code 项目格式）和 `<cwd>/.cursor/mcp.json`（Cursor 项目格式）
+  - 默认**不**读取 `~/.claude.json` 里的 `projects[*].mcpServers`，需要的话加 `--include-projects`
 - 传输支持：stdio / Streamable HTTP / SSE
 - 输出形态：`<outDir>/<server>/SKILL.md`（含 frontmatter）+ `<outDir>/<server>/tools/<tool>.json`
 
@@ -76,8 +79,17 @@ pnpm build                 # 出 dist/cli.js + dist/index.js + .d.ts
 # 换输出目录（注意 pnpm 透传参数要加 --）
 pnpm start sync -- --out ~/.claude/skills
 
-# 不要项目级的 mcpServers，只要 ~/.claude.json 顶层的
-pnpm start list -- --no-projects
+# 只读全局，不读当前目录下的 .mcp.json / .cursor/mcp.json
+pnpm start list -- --no-local
+
+# 只读当前目录的项目级配置，不读 ~/.claude.json
+pnpm start list -- --no-global
+
+# 指定要扫描的项目目录
+pnpm start list -- --cwd /path/to/some/project
+
+# 也读取 ~/.claude.json 里 projects[*].mcpServers（默认不读）
+pnpm start list -- --include-projects
 
 # 不生成 tools/*.json，只要 SKILL.md
 pnpm start sync -- --no-schemas
@@ -91,7 +103,7 @@ pnpm start sync -- --redact-env
 # 慢启动 server 调高超时（默认 15s）
 pnpm start list -- --timeout 30000
 
-# 临时指定别的配置文件
+# 临时指定别的全局配置文件
 pnpm start list -- --config /path/to/some.claude.json
 
 # 调整并发探测数（默认 4）
@@ -237,9 +249,12 @@ node /path/to/mcp-to-skills/dist/cli.js list
 ## 当成库用
 
 ```ts
-import { discoverAll, loadClaudeCodeConfig, writeSkill } from 'mcp-to-skills'
+import { discoverAll, loadClaudeCodeConfig, loadLocalMcpConfigs, writeSkill } from 'mcp-to-skills'
 
-const servers = await loadClaudeCodeConfig()
+const servers = [
+  ...await loadClaudeCodeConfig(), // ~/.claude.json 顶层 mcpServers
+  ...await loadLocalMcpConfigs({ cwd: process.cwd() }), // <cwd>/.mcp.json + <cwd>/.cursor/mcp.json
+]
 const results = await discoverAll(servers, { timeoutMs: 20_000 })
 
 for (const r of results.filter(r => r.ok && r.tools.length > 5))
@@ -248,18 +263,19 @@ for (const r of results.filter(r => r.ok && r.tools.length > 5))
 
 主要导出：
 
-| 名称                                                                 | 说明                                             |
-| -------------------------------------------------------------------- | ------------------------------------------------ |
-| `loadClaudeCodeConfig(opts?)`                                        | 解析 `~/.claude.json`，返回 `DiscoveredServer[]` |
-| `discoverServer(server, opts?)`                                      | 连接单个 server，返回 `DiscoveryResult`          |
-| `discoverAll(servers, opts?)`                                        | 并发探测多个 server                              |
-| `renderSkill(result)`                                                | 把 `DiscoveryResult` 渲染成 `SKILL.md` 字符串    |
-| `writeSkill(result, { outDir })`                                     | 落盘 `SKILL.md` 与 `tools/*.json`                |
-| `writeServerBackup(result, outDir, { redactEnv? })`                  | 落盘 `<outDir>/<name>/mcp.json`                  |
-| `writeAggregateBackup(results, outDir, { configPath?, redactEnv? })` | 落盘 `<outDir>/mcp-backup.json`                  |
-| `sanitizeEntry(entry, { redactEnv? })`                               | 拷贝并按需脱敏一个 entry                         |
-| `listSkillDirs(from)`                                                | 列出 `from` 下所有含 `SKILL.md` 的子目录         |
-| `installSkills(from, to, { overwrite?, dryRun? })`                   | 把 `<from>/<server>/` 拷到 `<to>/<server>/`      |
+| 名称                                                                 | 说明                                                                                           |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `loadClaudeCodeConfig(opts?)`                                        | 解析 `~/.claude.json`，默认只读顶层 `mcpServers`；`includeProjects: true` 时再读 `projects[*]` |
+| `loadLocalMcpConfigs({ cwd? })`                                      | 解析 `<cwd>/.mcp.json` 和 `<cwd>/.cursor/mcp.json`（按 realpath 去重）                         |
+| `discoverServer(server, opts?)`                                      | 连接单个 server，返回 `DiscoveryResult`                                                        |
+| `discoverAll(servers, opts?)`                                        | 并发探测多个 server                                                                            |
+| `renderSkill(result)`                                                | 把 `DiscoveryResult` 渲染成 `SKILL.md` 字符串                                                  |
+| `writeSkill(result, { outDir })`                                     | 落盘 `SKILL.md` 与 `tools/*.json`                                                              |
+| `writeServerBackup(result, outDir, { redactEnv? })`                  | 落盘 `<outDir>/<name>/mcp.json`                                                                |
+| `writeAggregateBackup(results, outDir, { configPath?, redactEnv? })` | 落盘 `<outDir>/mcp-backup.json`                                                                |
+| `sanitizeEntry(entry, { redactEnv? })`                               | 拷贝并按需脱敏一个 entry                                                                       |
+| `listSkillDirs(from)`                                                | 列出 `from` 下所有含 `SKILL.md` 的子目录                                                       |
+| `installSkills(from, to, { overwrite?, dryRun? })`                   | 把 `<from>/<server>/` 拷到 `<to>/<server>/`                                                    |
 
 ---
 

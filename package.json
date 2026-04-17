@@ -1,7 +1,7 @@
 {
   "name": "@mgong/mcp-to-skills",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Discover MCP servers configured for Claude Code and turn them into Skills (SKILL.md + per-tool JSON schemas) for Claude / Cursor.",
   "author": "Michael Gong",
   "license": "MIT",

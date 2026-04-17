@@ -17,7 +17,13 @@ For every server you get:
 - `mcp.json` — a backup of the original MCP entry, so you can safely delete it from `~/.claude.json`
 
 Supported transports: **stdio**, **Streamable HTTP**, **SSE**.
-Supported sources: top-level `mcpServers` and `projects[*].mcpServers` in `~/.claude.json`.
+
+Supported sources (merged automatically):
+
+- **Global** — top-level `mcpServers` in `~/.claude.json` (use `--config` to point elsewhere)
+- **Project (cwd)** — `<cwd>/.mcp.json` (Claude Code project format) and `<cwd>/.cursor/mcp.json` (Cursor project format)
+
+The legacy `projects[*].mcpServers` map inside `~/.claude.json` is **not** read by default; pass `--include-projects` if you still want it.
 
 ---
 
@@ -73,8 +79,17 @@ Run `mcp-to-skills --help` for the full list of flags.
 # Pick a different output directory
 mcp-to-skills sync --out ~/.claude/skills
 
-# Skip the project-level mcpServers in the config
-mcp-to-skills list --no-projects
+# Only the global config (skip <cwd>/.mcp.json and <cwd>/.cursor/mcp.json)
+mcp-to-skills list --no-local
+
+# Only project-level configs in the current directory (skip ~/.claude.json)
+mcp-to-skills list --no-global
+
+# Scan a specific directory for project-level configs
+mcp-to-skills list --cwd /path/to/some/project
+
+# Also include the legacy projects[*].mcpServers map from ~/.claude.json
+mcp-to-skills list --include-projects
 
 # Don't emit per-tool JSON schemas
 mcp-to-skills sync --no-schemas
@@ -88,7 +103,7 @@ mcp-to-skills sync --no-redact-env
 # Bigger timeout for slow-starting stdio servers
 mcp-to-skills list --timeout 30000
 
-# Use a different config file
+# Use a different global config file
 mcp-to-skills list --config /path/to/some.claude.json
 
 # More parallel probes
@@ -141,9 +156,12 @@ mcp-to-skills install --from ./generated --to ~/.claude/skills
 ## Use as a library
 
 ```ts
-import { discoverAll, loadClaudeCodeConfig, writeSkill } from '@mgong/mcp-to-skills'
+import { discoverAll, loadClaudeCodeConfig, loadLocalMcpConfigs, writeSkill } from '@mgong/mcp-to-skills'
 
-const servers = await loadClaudeCodeConfig()
+const servers = [
+  ...await loadClaudeCodeConfig(), // global ~/.claude.json (top-level only)
+  ...await loadLocalMcpConfigs({ cwd: process.cwd() }), // <cwd>/.mcp.json + <cwd>/.cursor/mcp.json
+]
 const results = await discoverAll(servers, { timeoutMs: 20_000 })
 
 for (const r of results.filter(r => r.ok && r.tools.length > 5))
@@ -152,18 +170,19 @@ for (const r of results.filter(r => r.ok && r.tools.length > 5))
 
 Public exports:
 
-| Export                                                               | Purpose                                                 |
-| -------------------------------------------------------------------- | ------------------------------------------------------- |
-| `loadClaudeCodeConfig(opts?)`                                        | Parse `~/.claude.json`, return `DiscoveredServer[]`     |
-| `discoverServer(server, opts?)`                                      | Connect to a single server and list its tools           |
-| `discoverAll(servers, opts?)`                                        | Probe many servers in parallel                          |
-| `renderSkill(result)`                                                | Render a `DiscoveryResult` into a `SKILL.md` string     |
-| `writeSkill(result, { outDir })`                                     | Write `SKILL.md` and `tools/*.json` to disk             |
-| `writeServerBackup(result, outDir, { redactEnv? })`                  | Write `<outDir>/<name>/mcp.json`                        |
-| `writeAggregateBackup(results, outDir, { configPath?, redactEnv? })` | Write `<outDir>/mcp-backup.json`                        |
-| `sanitizeEntry(entry, { redactEnv? })`                               | Clone an MCP entry, optionally redacting secrets        |
-| `listSkillDirs(from)`                                                | List subdirectories of `from` that contain a `SKILL.md` |
-| `installSkills(from, to, { overwrite?, dryRun? })`                   | Copy `<from>/<server>/` into `<to>/<server>/`           |
+| Export                                                               | Purpose                                                                                                         |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `loadClaudeCodeConfig(opts?)`                                        | Parse `~/.claude.json` (top-level `mcpServers` only by default; pass `includeProjects: true` for `projects[*]`) |
+| `loadLocalMcpConfigs({ cwd? })`                                      | Parse `<cwd>/.mcp.json` and `<cwd>/.cursor/mcp.json` (deduped via realpath)                                     |
+| `discoverServer(server, opts?)`                                      | Connect to a single server and list its tools                                                                   |
+| `discoverAll(servers, opts?)`                                        | Probe many servers in parallel                                                                                  |
+| `renderSkill(result)`                                                | Render a `DiscoveryResult` into a `SKILL.md` string                                                             |
+| `writeSkill(result, { outDir })`                                     | Write `SKILL.md` and `tools/*.json` to disk                                                                     |
+| `writeServerBackup(result, outDir, { redactEnv? })`                  | Write `<outDir>/<name>/mcp.json`                                                                                |
+| `writeAggregateBackup(results, outDir, { configPath?, redactEnv? })` | Write `<outDir>/mcp-backup.json`                                                                                |
+| `sanitizeEntry(entry, { redactEnv? })`                               | Clone an MCP entry, optionally redacting secrets                                                                |
+| `listSkillDirs(from)`                                                | List subdirectories of `from` that contain a `SKILL.md`                                                         |
+| `installSkills(from, to, { overwrite?, dryRun? })`                   | Copy `<from>/<server>/` into `<to>/<server>/`                                                                   |
 
 ---
 
@@ -245,13 +264,13 @@ Resolves a package/product name to a Context7-compatible library ID...
 
 ## Troubleshooting
 
-| Symptom                   | Likely cause                                                            |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `FAIL (transport: ...)`   | Wrong / missing fields on the URL or command                            |
-| `FAIL (... timed out)`    | Server starts slowly — retry with `--timeout 30000`                     |
-| `FAIL (spawn xxx ENOENT)` | The stdio `command` is not on `PATH`. Use an absolute path              |
-| `FAIL (401 / 403)`        | The HTTP server needs auth headers (`headers` in the entry)             |
-| `No MCP servers found`    | `~/.claude.json` doesn't have `mcpServers` (or you ran `--no-projects`) |
+| Symptom                   | Likely cause                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FAIL (transport: ...)`   | Wrong / missing fields on the URL or command                                                                                                                                                                             |
+| `FAIL (... timed out)`    | Server starts slowly — retry with `--timeout 30000`                                                                                                                                                                      |
+| `FAIL (spawn xxx ENOENT)` | The stdio `command` is not on `PATH`. Use an absolute path                                                                                                                                                               |
+| `FAIL (401 / 403)`        | The HTTP server needs auth headers (`headers` in the entry)                                                                                                                                                              |
+| `No MCP servers found`    | Neither `~/.claude.json` nor `<cwd>/.mcp.json` / `<cwd>/.cursor/mcp.json` defines any server. Pass `--include-projects` for the legacy `projects[*].mcpServers` map, or `cd` into a project that has a local `.mcp.json` |
 
 To see a stdio server's own stderr, edit `src/discover.ts` and switch `stderr: 'pipe'` to `'inherit'`.
 

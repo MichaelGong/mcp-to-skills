@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import type { DiscoveredServer } from './types'
 import fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { cancel, confirm, intro, isCancel, log, outro, select, text } from '@clack/prompts'
 import pc from 'picocolors'
-import { loadClaudeCodeConfig } from './config'
+import { loadClaudeCodeConfig, loadLocalMcpConfigs } from './config'
 import { discoverAll } from './discover'
 import { installSkills, listSkillDirs, writeAggregateBackup, writeServerBackup, writeSkill } from './skill'
 
@@ -44,11 +45,18 @@ Usage:
                               (default target: ${DEFAULT_INSTALL_TARGET})
 
 Discovery options:
-  --config <path>      Config file to read (default: ~/.claude.json)
+  --config <path>      Global config file (default: ~/.claude.json)
+                       Only the top-level mcpServers field is read.
+  --cwd <dir>          Directory to scan for project-level configs
+                       (default: current working directory). Reads
+                       <cwd>/.mcp.json and <cwd>/.cursor/mcp.json.
+  --no-global          Skip the global config file
+  --no-local           Skip <cwd>/.mcp.json and <cwd>/.cursor/mcp.json
+  --include-projects   Also read projects[*].mcpServers from the
+                       global config (off by default)
   --out, -o <dir>      Output directory for sync (default: ./skills)
   --timeout <ms>       Per-request timeout (default: 15000)
   --concurrency <n>    Parallel server probes (default: 4)
-  --no-projects        Ignore projects[*].mcpServers in the config
   --no-schemas         Do not emit per-tool JSON schemas alongside SKILL.md
   --no-backup          Do not write mcp.json / mcp-backup.json config snapshots
 
@@ -71,10 +79,14 @@ Misc:
 
 const OPTIONS = {
   'config': { type: 'string' },
+  'cwd': { type: 'string' },
+  // Both sources are on by default; pass --no-global / --no-local to skip.
+  'no-global': { type: 'boolean', default: false },
+  'no-local': { type: 'boolean', default: false },
+  'include-projects': { type: 'boolean', default: false },
   'out': { type: 'string', short: 'o', default: 'skills' },
   'timeout': { type: 'string', default: '15000' },
   'concurrency': { type: 'string', default: '4' },
-  'no-projects': { type: 'boolean', default: false },
   'no-schemas': { type: 'boolean', default: false },
   'no-backup': { type: 'boolean', default: false },
   // `--no-redact-env` flips this to false; default is "redact" for safety.
@@ -125,13 +137,16 @@ async function main(): Promise<void> {
     return
   }
 
-  const servers = await loadClaudeCodeConfig({
-    configPath: values.config,
-    includeProjects: !values['no-projects'],
-  })
+  const servers = await collectServers(values)
 
   if (servers.length === 0) {
-    process.stderr.write('No MCP servers found in the config.\n')
+    process.stderr.write(
+      'No MCP servers found.\n'
+      + '  - Looked in: ~/.claude.json (top-level mcpServers)\n'
+      + '  - Looked in: <cwd>/.mcp.json and <cwd>/.cursor/mcp.json\n'
+      + '  - Pass --include-projects to also read ~/.claude.json projects[*].mcpServers,\n'
+      + '    or --config <path> to use a different global config file.\n',
+    )
     process.exitCode = 1
     return
   }
@@ -208,6 +223,39 @@ async function main(): Promise<void> {
 
   process.stderr.write(`Unknown command: ${cmd}\n\n${USAGE}`)
   process.exitCode = 2
+}
+
+interface DiscoveryCliOptions {
+  'config'?: string
+  'cwd'?: string
+  'no-global'?: boolean
+  'no-local'?: boolean
+  'include-projects'?: boolean
+}
+
+/**
+ * Combine MCP servers from the global config (~/.claude.json by default,
+ * top-level mcpServers only) with project-level servers declared in the
+ * current working directory (<cwd>/.mcp.json and <cwd>/.cursor/mcp.json).
+ *
+ * Either source can be turned off with `--no-global` / `--no-local`.
+ */
+async function collectServers(values: DiscoveryCliOptions): Promise<DiscoveredServer[]> {
+  const out: DiscoveredServer[] = []
+
+  if (!values['no-global']) {
+    out.push(...await loadClaudeCodeConfig({
+      configPath: values.config,
+      includeProjects: !!values['include-projects'],
+    }))
+  }
+
+  if (!values['no-local']) {
+    const cwd = values.cwd ? path.resolve(expandHome(values.cwd)) : process.cwd()
+    out.push(...await loadLocalMcpConfigs({ cwd }))
+  }
+
+  return out
 }
 
 /** Expand a leading `~` or `~/` to the user's home directory. */

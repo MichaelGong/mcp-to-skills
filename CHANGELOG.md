@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-17
+
+### Changed
+- `list` / `sync` no longer parse `projects[*].mcpServers` from
+  `~/.claude.json` by default. Only the **top-level** `mcpServers` field
+  is read. Pass `--include-projects` to opt back in.
+- `loadClaudeCodeConfig({ includeProjects })` now defaults to `false`.
+
+### Added
+- `list` / `sync` also discover MCP servers declared in the current
+  working directory: `<cwd>/.mcp.json` (Claude Code project format) and
+  `<cwd>/.cursor/mcp.json` (Cursor project format). Symlinks pointing at
+  the same underlying file are deduped via `fs.realpath`.
+- New CLI flags: `--cwd <dir>`, `--no-global`, `--no-local`,
+  `--include-projects`.
+- New library export `loadLocalMcpConfigs({ cwd? })`.
+
+### Removed
+- `--no-projects` flag (replaced by the new default; use
+  `--include-projects` to bring the legacy behavior back).
+
 ## [0.1.0] - 2026-04-17
 
 ### Added
@@ -27,5 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (use `--no-redact-env` to opt out)
 - `skills/` is git-ignored to prevent accidental commit of token-bearing backups
 
-[Unreleased]: https://github.com/MichaelGong/mcp-to-skills/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MichaelGong/mcp-to-skills/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MichaelGong/mcp-to-skills/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MichaelGong/mcp-to-skills/releases/tag/v0.1.0
