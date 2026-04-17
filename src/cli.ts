@@ -7,7 +7,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { cancel, confirm, intro, isCancel, log, outro, select, text } from '@clack/prompts'
+import { cancel, confirm, intro, isCancel, log, multiselect, outro, select, text } from '@clack/prompts'
 import pc from 'picocolors'
 import { loadClaudeCodeConfig, loadLocalMcpConfigs } from './config'
 import { discoverAll } from './discover'
@@ -43,6 +43,9 @@ Usage:
   ${BIN} sync     [options]   Write SKILL.md + config backup to <out>/<server>/
   ${BIN} install  [options]   Copy generated skills to a target dir
                               (default target: ${DEFAULT_INSTALL_TARGET})
+  ${BIN} setup    [options]   Interactive one-shot wizard:
+                              discover -> pick MCPs -> generate -> pick skills
+                              -> pick install target. Confirms between steps.
 
 Discovery options:
   --config <path>      Global config file (default: ~/.claude.json)
@@ -134,6 +137,11 @@ async function main(): Promise<void> {
 
   if (cmd === 'install') {
     await runInstall(values)
+    return
+  }
+
+  if (cmd === 'setup') {
+    await runSetup(values)
     return
   }
 
@@ -401,6 +409,237 @@ async function runInstall(values: InstallCliOptions): Promise<void> {
   }
 
   const report = await installSkills(from, target, { dryRun, overwrite })
+
+  for (const name of report.copied) {
+    log.success(
+      `${dryRun ? pc.dim('[dry] ') : ''}${pc.green('+')} ${name} ${pc.dim('->')} ${path.join(target, name)}`,
+    )
+  }
+  for (const { name, reason } of report.skipped)
+    log.warn(`${pc.yellow('!')} skip ${name} ${pc.dim(`(${reason})`)}`)
+
+  outro(
+    `${pc.bold(String(report.copied.length))} installed, `
+    + `${pc.bold(String(report.skipped.length))} skipped`
+    + `${dryRun ? pc.dim('  (dry run, no files written)') : ''}`,
+  )
+}
+
+interface SetupCliOptions
+  extends DiscoveryCliOptions, InstallCliOptions {
+  'out'?: string
+  'timeout'?: string
+  'concurrency'?: string
+  'no-schemas'?: boolean
+  'no-backup'?: boolean
+  'redact-env'?: boolean
+}
+
+/**
+ * One-shot interactive wizard: discover MCP servers, let the user pick which
+ * ones to convert into skills, generate the skills, then pick which to install
+ * and where. Each step has a confirmation; cancelling at any prompt aborts
+ * cleanly. With `--yes`, sensible defaults are taken non-interactively
+ * (all reachable servers, default output dir, default install target,
+ * never overwrite).
+ */
+async function runSetup(values: SetupCliOptions): Promise<void> {
+  const nonInteractive = !!values.yes || !process.stdin.isTTY
+  intro(pc.cyan(` ${BIN} setup `))
+
+  // ---- Step 1: discover -------------------------------------------------
+  const servers = await collectServers(values)
+  if (servers.length === 0) {
+    cancel(
+      'No MCP servers found.\n'
+      + '  - Looked in: ~/.claude.json (top-level mcpServers)\n'
+      + '  - Looked in: <cwd>/.mcp.json and <cwd>/.cursor/mcp.json\n'
+      + '  - Pass --include-projects, or --config <path> to point elsewhere.',
+    )
+    process.exitCode = 1
+    return
+  }
+
+  const timeoutMs = Number(values.timeout ?? '15000')
+  const concurrency = Number(values.concurrency ?? '4')
+  log.info(`Discovered ${pc.bold(String(servers.length))} server(s). Probing...`)
+  const results = await discoverAll(servers, { timeoutMs, concurrency })
+  const okCount = results.filter(r => r.ok).length
+  log.info(`${pc.green(String(okCount))}/${results.length} reachable`)
+
+  let selectedNames: string[]
+  if (nonInteractive) {
+    selectedNames = results.filter(r => r.ok).map(r => r.serverName)
+  }
+  else {
+    const okNames = results.filter(r => r.ok).map(r => r.serverName)
+    const picked = await multiselect<string>({
+      message: 'Step 1/3 — pick MCP servers to turn into skills',
+      options: results.map(r => ({
+        value: r.serverName,
+        label: r.ok
+          ? `${r.serverName} ${pc.dim(`· ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}`)}`
+          : `${r.serverName} ${pc.red('· FAIL')}`,
+        hint: r.ok ? r.source : `${r.error} (${r.source})`,
+      })),
+      initialValues: okNames,
+      required: false,
+    })
+    bailIfCancelled(picked)
+    selectedNames = picked
+  }
+
+  if (selectedNames.length === 0) {
+    cancel('No servers selected.')
+    return
+  }
+
+  if (!nonInteractive) {
+    const ok = await confirm({
+      message: `Generate SKILL.md for ${pc.bold(String(selectedNames.length))} server(s)?`,
+      initialValue: true,
+    })
+    bailIfCancelled(ok)
+    if (!ok) {
+      cancel('Aborted before generation.')
+      return
+    }
+  }
+
+  // ---- Step 2: generate -------------------------------------------------
+  let outDir: string
+  if (values.out) {
+    outDir = path.resolve(expandHome(values.out))
+  }
+  else if (nonInteractive) {
+    outDir = path.resolve('skills')
+  }
+  else {
+    const typed = await text({
+      message: 'Step 2/3 — directory to write generated skills',
+      placeholder: './skills',
+      defaultValue: 'skills',
+    })
+    bailIfCancelled(typed)
+    outDir = path.resolve(expandHome(typed || 'skills'))
+  }
+
+  const writeBackup = !values['no-backup']
+  const writeSchemas = !values['no-schemas']
+  const redactEnv = values['redact-env'] !== false
+
+  const selectedSet = new Set(selectedNames)
+  const selectedResults = results.filter(r => selectedSet.has(r.serverName))
+  const generated: string[] = []
+  const rel = (p: string): string => path.relative(process.cwd(), p)
+
+  for (const r of selectedResults) {
+    if (writeBackup) {
+      const bp = await writeServerBackup(r, outDir, { redactEnv })
+      log.step(`backup ${pc.cyan(r.serverName)} ${pc.dim('->')} ${rel(bp)}`)
+    }
+    if (!r.ok) {
+      log.warn(`skip SKILL.md for ${r.serverName}: ${r.error}`)
+      continue
+    }
+    const sp = await writeSkill(r, { outDir, writeRawSchemas: writeSchemas })
+    generated.push(r.serverName)
+    log.success(
+      `${pc.green('+')} skill ${pc.cyan(r.serverName)} ${pc.dim(`(${r.tools.length} tools)`)} ${pc.dim('->')} ${rel(sp)}`,
+    )
+  }
+
+  if (writeBackup) {
+    const configPath = values.config ?? path.join(os.homedir(), '.claude.json')
+    const ap = await writeAggregateBackup(selectedResults, outDir, { configPath, redactEnv })
+    log.step(`aggregate backup ${pc.dim('->')} ${rel(ap)}`)
+    if (!redactEnv) {
+      log.warn('Backups contain raw env / headers values. Do NOT commit or share them.')
+    }
+  }
+
+  if (generated.length === 0) {
+    cancel('No skills were generated; nothing to install.')
+    return
+  }
+
+  // ---- Step 3: install --------------------------------------------------
+  let toInstall: string[]
+  if (nonInteractive) {
+    toInstall = generated
+  }
+  else {
+    const picked = await multiselect<string>({
+      message: 'Step 3/3 — pick skills to install',
+      options: generated.map(n => ({ value: n, label: n })),
+      initialValues: generated,
+      required: false,
+    })
+    bailIfCancelled(picked)
+    toInstall = picked
+  }
+
+  if (toInstall.length === 0) {
+    outro(`No skills selected to install. Generation kept under ${pc.dim(rel(outDir))}`)
+    return
+  }
+
+  let target: string
+  if (values.to)
+    target = path.resolve(expandHome(values.to))
+  else if (nonInteractive)
+    target = DEFAULT_INSTALL_TARGET
+  else
+    target = await promptTarget(DEFAULT_INSTALL_TARGET)
+
+  let overwrite = !!values.overwrite
+  const conflicts: string[] = []
+  for (const name of toInstall) {
+    const dst = path.join(target, name)
+    const exists = await fs.stat(dst).then(() => true).catch(() => false)
+    if (exists)
+      conflicts.push(name)
+  }
+
+  if (conflicts.length > 0 && !overwrite) {
+    if (nonInteractive) {
+      log.warn(
+        `${conflicts.length} skill(s) will be skipped because they already exist `
+        + '(use --overwrite to replace).',
+      )
+    }
+    else {
+      log.warn(
+        `${conflicts.length} skill(s) already exist at the target: ${
+          conflicts.map(n => pc.yellow(n)).join(', ')}`,
+      )
+      const ans = await confirm({
+        message: 'Overwrite the existing skills?',
+        initialValue: false,
+      })
+      bailIfCancelled(ans)
+      overwrite = ans
+    }
+  }
+
+  if (!nonInteractive) {
+    const ok = await confirm({
+      message: `Install ${pc.bold(String(toInstall.length))} skill(s) to ${pc.cyan(target)}?`,
+      initialValue: true,
+    })
+    bailIfCancelled(ok)
+    if (!ok) {
+      cancel('Aborted before install.')
+      return
+    }
+  }
+
+  const dryRun = !!values['dry-run']
+  const report = await installSkills(outDir, target, {
+    dryRun,
+    overwrite,
+    names: toInstall,
+  })
 
   for (const name of report.copied) {
     log.success(

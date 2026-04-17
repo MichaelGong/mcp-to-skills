@@ -1,7 +1,7 @@
 {
   "name": "@mgong/mcp-to-skills",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Discover MCP servers configured for Claude Code and turn them into Skills (SKILL.md + per-tool JSON schemas) for Claude / Cursor.",
   "author": "Michael Gong",
   "license": "MIT",
@@ -57,6 +57,8 @@
     "dev": "tsx src/cli.ts",
     "list": "tsx src/cli.ts list",
     "sync": "tsx src/cli.ts sync",
+    "setup": "tsx src/cli.ts setup",
+    "install:skills": "tsx src/cli.ts install",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",

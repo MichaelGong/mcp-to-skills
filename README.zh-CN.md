@@ -65,6 +65,7 @@ skills/
 pnpm start list            # 探测 + 打印
 pnpm start sync            # 探测 + 写 SKILL.md
 mcp-to-skills install         # 把 ./skills/ 拷到 Claude / Cursor 等目录（交互式）
+mcp-to-skills setup           # 一键向导：探测 → 选 MCP → 生成 → 选 skill → 选目标，三步都二次确认
 pnpm start --help          # 全部参数
 
 pnpm typecheck             # tsc --noEmit

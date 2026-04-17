@@ -67,4 +67,17 @@ describe('installSkills', () => {
     expect(report.copied.sort()).toEqual(['alpha', 'beta'])
     await expect(fs.stat(to)).rejects.toThrow()
   })
+
+  it('with `names` filter only installs the listed subset', async () => {
+    const report = await installSkills(from, to, { names: ['alpha'] })
+    expect(report.copied).toEqual(['alpha'])
+    expect(report.skipped).toEqual([])
+    await expect(fs.stat(path.join(to, 'beta'))).rejects.toThrow()
+  })
+
+  it('with `names` filter records unknown names as skipped', async () => {
+    const report = await installSkills(from, to, { names: ['alpha', 'ghost'] })
+    expect(report.copied).toEqual(['alpha'])
+    expect(report.skipped).toEqual([{ name: 'ghost', reason: 'not generated' }])
+  })
 })

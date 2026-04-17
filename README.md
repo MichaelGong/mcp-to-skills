@@ -65,11 +65,12 @@ skills/
 
 ## Commands
 
-| Command   | What it does                                             |
-| --------- | -------------------------------------------------------- |
-| `list`    | Probe every server, print connectivity + tool list       |
-| `sync`    | Probe servers and write `SKILL.md` + config backups      |
-| `install` | Copy `./skills/<server>/` into a target skills directory |
+| Command   | What it does                                                                          |
+| --------- | ------------------------------------------------------------------------------------- |
+| `list`    | Probe every server, print connectivity + tool list                                    |
+| `sync`    | Probe servers and write `SKILL.md` + config backups                                   |
+| `install` | Copy `./skills/<server>/` into a target skills directory                              |
+| `setup`   | One-shot interactive wizard: pick MCPs → generate → pick skills → pick install target |
 
 Run `mcp-to-skills --help` for the full list of flags.
 

@@ -291,6 +291,12 @@ export interface InstallOptions {
   overwrite?: boolean
   /** Print actions without touching disk. */
   dryRun?: boolean
+  /**
+   * If provided, only install skills whose directory name appears in this list.
+   * Names not present under `from` are reported as skipped with reason
+   * `"not generated"`. Defaults to all skills found under `from`.
+   */
+  names?: string[]
 }
 
 export interface InstallReport {
@@ -334,8 +340,24 @@ export async function installSkills(
   to: string,
   opts: InstallOptions = {},
 ): Promise<InstallReport> {
-  const skills = await listSkillDirs(from)
+  const available = await listSkillDirs(from)
   const report: InstallReport = { copied: [], skipped: [] }
+
+  let skills: string[]
+  if (opts.names && opts.names.length > 0) {
+    const present = new Set(available)
+    skills = []
+    for (const n of opts.names) {
+      if (present.has(n))
+        skills.push(n)
+      else
+        report.skipped.push({ name: n, reason: 'not generated' })
+    }
+  }
+  else {
+    skills = available
+  }
+
   if (skills.length === 0)
     return report
 
