@@ -1,5 +1,15 @@
 name: Release
 
+# Publishes @mgong/mcp-to-skills to npm whenever a `vX.Y.Z` tag is pushed.
+#
+# Auth strategy: npm Trusted Publisher (OIDC). No NPM_TOKEN secret is needed
+# as long as you've registered this repo + workflow as a trusted publisher
+# at https://www.npmjs.com/settings/mgong/packages
+#
+# Fallback: if you ever revert to a classic token, add a `NPM_TOKEN` repo
+# secret and append `env: { NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} }` to
+# the publish step below.
+
 on:
   push:
     tags:
@@ -10,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # required for npm provenance
+      id-token: write # required for npm OIDC + provenance
 
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +45,5 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC + provenance)
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
