@@ -1,0 +1,83 @@
+{
+  "name": "@mgong/mcp-to-skills",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Discover MCP servers configured for Claude Code and turn them into Skills (SKILL.md + per-tool JSON schemas) for Claude / Cursor.",
+  "author": "Michael Gong",
+  "license": "MIT",
+  "homepage": "https://github.com/MichaelGong/mcp-to-skills#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelGong/mcp-to-skills.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MichaelGong/mcp-to-skills/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "cursor",
+    "skills",
+    "anthropic",
+    "cli",
+    "agent"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mcp-to-skills": "dist/cli.js"
+  },
+  "files": [
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
+    "start": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
+    "list": "tsx src/cli.ts list",
+    "sync": "tsx src/cli.ts sync",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^8.2.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.2.0",
+    "eslint-plugin-format": "^2.0.1",
+    "tsdown": "^0.21.9",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.1.0"
+  }
+}
